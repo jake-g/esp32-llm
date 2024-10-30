@@ -4,6 +4,10 @@ A port of llama2.c for the ESP32-S3 microcontroller. This project implements a l
 
 This project is aimed to create a very simple AI Dreaming Machine. The only thing this code does is generate little AI dreams.But it does it in only 512Kb of memory on a very underpowered micro controller.
 
+Developed by Massimo Di Leo [NuvolaProject](https://nuvolaproject.cloud) starting from the wonderful works of A.Karpathy and D.Bennet.
+
+There are some minor improvements over Bennet implementation of llama2.c on ESP32. I noticed that the original project generates more or less always the same story. I tweaked the code in order to add a little bit more of randomness in the seed generation. Also I changed the model from tiny stories to a custom trained version called aidreams260K. This model has been trained from a dataset of 2000 AI generated dreams. These dreams have beeen created with llama3-8b but with custom prompts in order to get a properly structured AI generated dreams, not human dreams.
+
 ## Features
 
 - Runs on ESP32-S3 with minimal resources
@@ -94,7 +98,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 - Based on [llama2.c](https://github.com/karpathy/llama2.c) by Andrej Karpathy
 - and on [esp32-llm](https://github.com/DaveBben/esp32-llm) by Dave Bennet
-- ESP32 port developed by Massimo Di Leo
+
 
 ## Contributing
 
