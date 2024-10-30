@@ -26,8 +26,8 @@ typedef struct {
 typedef struct {
     int vocab_size;
     ProbIndex* probindex; // buffer used in top-p sampling
-    float temperature;
-    float topp;
+    float temperature;    // Cambiato da v4sf a float
+    float topp;          // Cambiato da v4sf a float
     unsigned long long rng_state;
 } Sampler;
 
@@ -108,6 +108,7 @@ typedef struct {
 
 typedef void (*generated_complete_cb)(float tokens_ps);
 
+void reset_run_state(RunState *s, Config *p);
 void build_transformer(Transformer *t, char* checkpoint_path);
 void build_tokenizer(Tokenizer* t, char* tokenizer_path, int vocab_size);
 void build_sampler(Sampler* sampler, int vocab_size, float temperature, float topp, unsigned long long rng_seed);

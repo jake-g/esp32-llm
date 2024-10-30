@@ -31,6 +31,10 @@
 #define ALL_SYNC_BITS (TASK_0_BIT | TASK_1_BIT)
 #define ALL_FORWARD_TASKS (FORWARD_TASK_1 | FORWARD_TASK_2)
 
+
+#define LOG_LOCAL_LEVEL ESP_LOG_DEBUG
+#include "esp_log.h"
+
 typedef struct
 {
     v4sf *xout;
@@ -939,16 +943,15 @@ int sample_topp(v4sf *probabilities, int n, v4sf topp, ProbIndex *probindex, v4s
     }
     return probindex[last_idx].index; // in case of rounding errors
 }
-
-void build_sampler(Sampler *sampler, int vocab_size, v4sf temperature, v4sf topp, unsigned long long rng_seed)
-{
+void build_sampler(Sampler *sampler, int vocab_size, float temperature, float topp, unsigned long long rng_seed) {
     sampler->vocab_size = vocab_size;
-    sampler->temperature = temperature;
-    sampler->topp = topp;
+    ESP_LOGI(TAG, "Building sampler with temperature: %f, topp: %f", temperature, topp);
+    sampler->temperature = temperature;  // il tipo di sampler->temperature deve essere float, non v4sf
+    sampler->topp = topp;               // il tipo di sampler->topp deve essere float, non v4sf
     sampler->rng_state = rng_seed;
-    // buffer only used with nucleus sampling; may not need but it's ~small
     sampler->probindex = malloc(sampler->vocab_size * sizeof(ProbIndex));
-    ESP_LOGI(TAG, "Sampler Successfully built");
+    ESP_LOGI(TAG, "Sampler built with temperature: %f, topp: %f", 
+             sampler->temperature, sampler->topp);
 }
 
 void free_sampler(Sampler *sampler)
@@ -959,51 +962,76 @@ void free_sampler(Sampler *sampler)
 unsigned int random_u32(unsigned long long *state)
 {
     // xorshift rng: https://en.wikipedia.org/wiki/Xorshift#xorshift.2A
+    ESP_LOGD(TAG, "RNG state before: %llu", *state);
     *state ^= *state >> 12;
+    ESP_LOGD(TAG, "After first shift: %llu", *state);
     *state ^= *state << 25;
+    ESP_LOGD(TAG, "After second shift: %llu", *state);
     *state ^= *state >> 27;
-    return (*state * 0x2545F4914F6CDD1Dull) >> 32;
+    ESP_LOGD(TAG, "After third shift: %llu", *state);
+    unsigned int result = (*state * 0x2545F4914F6CDD1Dull) >> 32;
+    ESP_LOGD(TAG, "Final result: %u", result);
+    return result;
 }
 v4sf random_f32(unsigned long long *state)
 { // random v4sf32 in [0,1)
     return (random_u32(state) >> 8) / 16777216.0f;
 }
 
-int sample(Sampler *sampler, v4sf *logits)
-{
-    // sample the token given the logits and some hyperparameters
-    int next;
-    if (sampler->temperature == 0.0f)
-    {
-        // greedy argmax sampling: take the token with the highest probability
-        next = sample_argmax(logits, sampler->vocab_size);
-    }
-    else
-    {
-        // apply the temperature to the logits
-        for (int q = 0; q < sampler->vocab_size; q++)
-        {
-            logits[q] /= sampler->temperature;
-        }
-        // apply softmax to the logits to get the probabilities for next token
-        softmax(logits, sampler->vocab_size);
-        // flip a (v4sf) coin (this is our source of entropy for sampling)
-        v4sf coin = random_f32(&sampler->rng_state);
-        // we sample from this distribution to get the next token
-        if (sampler->topp <= 0 || sampler->topp >= 1)
-        {
-            // simply sample from the predicted probability distribution
-            next = sample_mult(logits, sampler->vocab_size, coin);
-        }
-        else
-        {
-            // top-p (nucleus) sampling, clamping the least likely tokens to zero
-            next = sample_topp(logits, sampler->vocab_size, sampler->topp, sampler->probindex, coin);
-        }
-    }
-    return next;
+void reset_run_state(RunState *s, Config *p) {
+    int kv_dim = (p->dim * p->n_kv_heads) / p->n_heads;
+    
+    // Reset all buffers to zero
+    memset(s->x, 0, p->dim * sizeof(v4sf));
+    memset(s->xb, 0, p->dim * sizeof(v4sf));
+    memset(s->xb2, 0, p->dim * sizeof(v4sf));
+    memset(s->hb, 0, p->hidden_dim * sizeof(v4sf));
+    memset(s->hb2, 0, p->hidden_dim * sizeof(v4sf));
+    memset(s->q, 0, p->dim * sizeof(v4sf));
+    memset(s->key_cache, 0, p->n_layers * p->seq_len * kv_dim * sizeof(v4sf));
+    memset(s->value_cache, 0, p->n_layers * p->seq_len * kv_dim * sizeof(v4sf));
+    memset(s->att, 0, p->n_heads * p->seq_len * sizeof(v4sf));
+    memset(s->logits, 0, p->vocab_size * sizeof(v4sf));
 }
 
+int sample(Sampler *sampler, v4sf *logits) {
+    // Existing temperature and topp validation
+    if (sampler->temperature < 0.0f || sampler->temperature > 2.0f) {
+        ESP_LOGE(TAG, "Invalid temperature: %f, resetting to 1.0", sampler->temperature);
+        sampler->temperature = 1.0f;
+    }
+    if (sampler->topp < 0.0f || sampler->topp > 1.0f) {
+        ESP_LOGE(TAG, "Invalid topp: %f, resetting to 0.9", sampler->topp);
+        sampler->topp = 0.9f;
+    }
+    
+    ESP_LOGD(TAG, "Start sampling with rng_state: %llu", sampler->rng_state);
+    int next;
+    if (sampler->temperature == 0.0f) {
+        next = sample_argmax(logits, sampler->vocab_size);
+    } else {
+        // Apply temperature scaling first
+        for (int q = 0; q < sampler->vocab_size; q++) {
+            logits[q] /= sampler->temperature;
+        }
+        
+        softmax(logits, sampler->vocab_size);
+        v4sf coin = random_f32(&sampler->rng_state);
+        ESP_LOGD(TAG, "Generated coin: %f", coin);
+        
+        // Always use top-p sampling as it's more stable
+        next = sample_topp(logits, sampler->vocab_size, sampler->topp, sampler->probindex, coin);
+    }
+
+    // Add basic bounds check
+    if (next < 0 || next >= sampler->vocab_size) {
+        ESP_LOGE(TAG, "Invalid token generated: %d, using fallback", next);
+        next = 0;  // fallback to a safe token
+    }
+    
+    ESP_LOGD(TAG, "Selected token: %d", next);
+    return next;
+}
 // ----------------------------------------------------------------------------
 // utilities: time
 
@@ -1020,6 +1048,7 @@ long time_in_ms()
 
 void generate(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler, char *prompt, int steps, generated_complete_cb cb_done)
 {
+    reset_run_state(&transformer->state, &transformer->config);
     char *empty_prompt = "";
     if (prompt == NULL)
     {
