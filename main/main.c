@@ -6,12 +6,8 @@
 #include "esp_log.h"
 #include <time.h>
 #include "llm.h"
-#include <u8g2.h>
-#include "u8g2_esp32_hal.h"
-#include <driver/i2c.h>
 #include <string.h>
-#include "llama.h"
-#include "esp_random.h"  // per esp_random()
+#include "esp_random.h"
 
 
 static const char *TAG = "MAIN";
