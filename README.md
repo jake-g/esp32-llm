@@ -1,4 +1,4 @@
-# llama2-esp32
+# Little AI Dreamer based on llama2-esp32
 
 A port of llama2.c for the ESP32-S3 microcontroller. This project implements a lightweight version of the Llama 2 architecture optimized for embedded systems.
 
@@ -93,7 +93,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Acknowledgments
 
 - Based on [llama2.c](https://github.com/karpathy/llama2.c) by Andrej Karpathy
-- and on [esp32-llm] (https://github.com/DaveBben/esp32-llm) by Dave Bennet
+- and on [esp32-llm](https://github.com/DaveBben/esp32-llm) by Dave Bennet
 - ESP32 port developed by Massimo Di Leo
 
 ## Contributing
