@@ -1,24 +1,11 @@
-# Little AI Dreamer based on llama2-esp32
+# Running a LLM on the ESP32
 
 A port of llama2.c for the ESP32-S3 microcontroller. This project implements a lightweight version of the Llama 2 architecture optimized for embedded systems.
 
-This project is aimed to create a very simple AI Dreaming Machine. The only thing this code does is generate little AI dreams.But it does it in only 512Kb of memory on a very underpowered micro controller.
+**Changes so far:**
+* tweaked the code in order to add a little bit more of randomness in the seed generation.
+* support for tiny stories and aidreams260K (mc9625).
 
-Developed by Massimo Di Leo [NuvolaProject](https://nuvolaproject.cloud) starting from the wonderful works of A.Karpathy and D.Bennet.
-
-There are some minor improvements over Bennet implementation of llama2.c on ESP32. I noticed that the original project generates more or less always the same story. I tweaked the code in order to add a little bit more of randomness in the seed generation. Also I changed the model from tiny stories to a custom trained version called aidreams260K. This model has been trained from a dataset of 2000 AI generated dreams. These dreams have beeen created with llama3-8b but with custom prompts in order to get a properly structured AI generated dreams, not human dreams.
-
-## Features
-
-- Runs on ESP32-S3 with minimal resources
-- Custom vocabulary size of 512 tokens
-- Optimized model architecture for embedded systems:
-  - Dimension: 64
-  - Layers: 4
-  - Heads: 4
-  - KV Heads: 4
-  - Max Sequence Length: 128
-  - Multiple of: 4
 
 ## Requirements
 
@@ -28,14 +15,23 @@ There are some minor improvements over Bennet implementation of llama2.c on ESP3
 - Minimum 4MB Flash
 
 ### Software
-- ESP-IDF v4.4 or later
+- ESP-IDF v4.5 or later
 - Python 3.7 or later (for training and tokenizer)
 
 ## Installation
 
+### VSCode Extension
+* Install [ESP-IDF Prereqs](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/linux-macos-setup.html#step-1-install-prerequisites)
+* Install and set up [ESP-IDF Extension](https://github.com/espressif/vscode-esp-idf-extension/blob/master/docs/tutorial/install.md)
+  * express install latest release (master), default everything
+  * main folder located `$HOME/esp/master/esp-idf/export.sh`
+* Using ESP Extension with project dir `esp32-llm`
+  * Build, Flash, Monitor, Clean, Select Board ect
+
+
+### Manual
 1. Clone this repository:
 ```bash
-git clone https://github.com/mc9625/llama2-esp32.git
 cd llama2-esp32
 ```
 
@@ -55,6 +51,8 @@ idf.py menuconfig
 idf.py build
 idf.py -p /dev/ttyUSB0 flash
 ```
+
+
 
 ## Model Configuration
 
@@ -98,8 +96,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 - Based on [llama2.c](https://github.com/karpathy/llama2.c) by Andrej Karpathy
 - and on [esp32-llm](https://github.com/DaveBben/esp32-llm) by Dave Bennet
-
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+- and on fork [esp32-llm](https://github.com/mc9625/esp32-llm/) by mc9625
