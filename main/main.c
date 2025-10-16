@@ -11,7 +11,7 @@
 
 
 static const char *TAG = "MAIN";
-#define NUM_GENERATIONS 20 // Constant for number of generations
+#define NUM_GENERATIONS 10 // Constant for number of generations
 
 /**
  * @brief intializes SPIFFS storage
@@ -66,7 +66,7 @@ void init_storage(void)
  */
 void write_display(char *text)
 {
-    printf(text);
+    
 }
 
 /**
@@ -78,11 +78,12 @@ void generate_complete_cb(float tk_s)
 {
     char buffer[50];
     sprintf(buffer, "%.2f tok/s", tk_s);
-    write_display(buffer);
+    // write_display(buffer); // char *text
+    // printf(text); // TODO connect display
 }
 
 /**
- * @brief Draws a llama onscreen
+ * @brief Generates a 64-bit random seed via  ESP RNG for initializing a PRNG.
  * 
  */
 unsigned long long get_random_seed(void) {
@@ -104,7 +105,7 @@ unsigned long long get_random_seed(void) {
 void app_main(void)
 {
     
-    write_display("Loading Model");
+    ESP_LOGI(TAG, "Loading Model");
     init_storage();
 
     // default parameters
@@ -114,7 +115,7 @@ void app_main(void)
     float temperature = 0.8f;        // 0.0 = greedy deterministic. 1.0 = original. don't set higher
     float topp = 0.9f;               // top-p in nucleus sampling. 1.0 = off. 0.9 works well, but slower
     int steps = 1024;                 // number of steps to run for
-    char *prompt = "One day in Seattle";             // prompt string
+    char *prompt = "Once upon a time in Seattle";             // prompt string
     // In app_main
     unsigned long long rng_seed = get_random_seed();
 
@@ -146,7 +147,7 @@ void app_main(void)
     // run multiple generations!
     for (int i = 0; i < NUM_GENERATIONS; i++)
     {
-        printf("Generating (%d/%d)\n", i + 1, NUM_GENERATIONS);
+        ESP_LOGI(TAG, "Generating (%d/%d)", i + 1, NUM_GENERATIONS);
         generate(&transformer, &tokenizer, &sampler, prompt, steps, &generate_complete_cb);
     }
 }

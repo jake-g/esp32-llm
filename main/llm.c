@@ -179,7 +179,7 @@ void read_checkpoint(char *checkpoint, Config *config, TransformerWeights *weigh
     // negative vocab size is hacky way of signaling unshared weights. bit yikes.
     int shared_weights = config->vocab_size > 0 ? 1 : 0;
     config->vocab_size = abs(config->vocab_size);
-    ESP_LOGI(TAG, "Vocab size if %d", config->vocab_size);
+    ESP_LOGI(TAG, "Vocab size is %d", config->vocab_size);
     // figure out the file size
     fseek(file, 0, SEEK_END); // move file pointer to end of file
     *file_size = ftell(file); // get the file size, in bytes
@@ -1113,12 +1113,12 @@ void generate(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler, 
     {
         long end = time_in_ms();
         float tks = (pos - 1) / (double)(end - start) * 1000;
-        fprintf(stderr, "achieved tok/s: %f\n", tks);
+        fprintf(stderr, "Achieved tok/s: %.3f\n", tks);
         cb_done(tks);
     }
 
     free(prompt_tokens);
-    ESP_LOGI(TAG, "Generate complete");
+    // ESP_LOGI(TAG, "Generate complete");
 }
 
 void read_stdin(const char *guide, char *buffer, size_t bufsize)
