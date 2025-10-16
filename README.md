@@ -2,7 +2,10 @@
 
 A port of llama2.c for the ESP32-S3 microcontroller. This project implements a lightweight version of the Llama 2 architecture optimized for embedded systems.
 
-**Changes so far:**
+
+<img src="https://imgur.com/XuHewD5.png" width="200">
+
+**Changelog:**
 * tweaked the code in order to add a little bit more of randomness in the seed generation.
 * support for tiny stories and aidreams260K (mc9625).
 * upgraded to `esp-idf` version `5.5`
@@ -125,17 +128,70 @@ The current model uses these parameters:
 - `src/main.c` - ESP32 application entry point
 - `components/` - External components and dependencies
 
-## Memory Usage
-
-- Flash: ~XMB for model weights
-- PSRAM: ~YKB for runtime buffers
-- RAM: ~ZKB for stack and heap
-
 ## Performance
 
 Current performance metrics:
 - Inference speed: ~17 tokens/second
 - Memory efficiency: Uses optimized data structures and FreeRTOS tasks
+
+## Memory Usage
+
+*   **Flash (SPIFFS):** ~1.05 MB (Model + Tokenizer files)
+*   **PSRAM (Heap):**
+    *   ~1.0 MB for Model Weights (static).
+    *   ~1.0 MB for RunState/KV-Cache (dynamic, allocated at startup).
+    *   Total PSRAM required: ~2.5 MB (leaving headroom for ESP-IDF overhead).
+*   **Internal SRAM:** Used for FreeRTOS stacks, DMA buffers, and high-speed temporary variables.
+
+## Technical Details
+
+This project ports the Llama 2 transformer architecture to the ESP32-S3, utilizing specific hardware acceleration and FreeRTOS features to achieve workable inference speeds on an embedded microcontroller.
+
+### The Inference Pipeline
+
+The text generation process follows a standard LLM pipeline, adapted for C and embedded constraints:
+
+1.  **Tokenizer (BPE):** The input string prompt is converted into a sequence of integer tokens using Byte Pair Encoding (BPE). The vocabulary is kept very small (512 tokens) to minimize the size of the embedding weights and output logits.
+2.  **Transformer Forward Pass:**
+    *   **Embedding:** The input token is converted into a vector of dimension `dim` (64).
+    *   **Layers:** The model iterates through `n_layers` (5). Each layer consists of:
+        *   RMSNorm (Root Mean Square Normalization).
+        *   **Multi-Query Attention (MQA):** Computes Query, Key, and Value vectors. Applies Rotary Positional Embeddings (RoPE) to Q and K. Updates the KV-Cache. Computes attention scores and the weighted sum of values.
+        *   **Feed-Forward Network (FFN):** A SwiGLU (SiLU gated linear unit) network that expands the dimension to `hidden_dim` and projects it back down.
+        *   Residual connections after Attention and FFN blocks.
+    *   **Classifier:** The final output vector is normalized and projected via matrix multiplication into logits (size of vocabulary).
+3.  **Sampler:** The logits are converted into probabilities via Softmax. A token is selected using **Top-P (Nucleus) Sampling** and **Temperature** scaling to introduce controlled randomness. High-quality entropy from the ESP32 hardware RNG is used to seed the sampling process.
+4.  **Detokenizer:** The selected integer token is mapped back to its corresponding string piece and output to the console.
+5.  **Autoregression:** The newly generated token becomes the input for the next iteration.
+
+### ESP32-S3 Optimizations
+
+To fit a transformer model into the limited resources of an MCU, several specific optimizations are employed:
+
+#### 1. Hardware Acceleration (DSP)
+The ESP32-S3 includes vector instructions meant for signal processing. This project utilizes the `esp-dsp` library, specifically `dsps_dotprod_f32_aes3`, to hardware-accelerate floating-point dot products. This is the bottleneck operation in matrix multiplications (MatMul) throughout the transformer.
+
+#### 2. Dual-Core Parallelization via FreeRTOS
+The inference engine does not run solely as a single-threaded process. It leverages the ESP32-S3's dual cores using FreeRTOS primitives:
+*   **Pinned Tasks:** Specific compute-heavy tasks (`matmul_task`, `forward_task`) are pinned to Core 1, while the main application logic runs on Core 0.
+*   **Synchronization:** `EventGroup` and `Semaphore` are used to coordinate data dependency between layers. For example, the multi-head attention mechanism splits work, signaling via semaphores when blocks of data are ready for the next stage of computation.
+
+#### 3. Memory Management (PSRAM)
+The ESP32-S3's internal SRAM is insufficient for even tiny LLMs.
+*   **Model Weights:** The `.bin` model file is read from SPIFFS storage and loaded entirely into external PSRAM via `malloc`.
+*   **RunState (KV Cache):** The dynamic memory required during inference (activations and the Key-Value cache) is allocated in PSRAM.
+
+### Model Specifications & Memory Footprint
+
+How does it fit in ~3MB of usable memory? The architecture is aggressively scaled down based on the "TinyStories" datasets.
+
+*   **Vocabulary Size:** **512 tokens**. Standard LLMs use 32k to 100k. A standard vocab (32000) with a dimension of 64 would require a 7.6MB embedding table alone. By reducing vocab to 512, the embedding table and final classifier weights are negligible in size.
+*   **Context Window:** **512 tokens**. This is the model's "short-term memory." It can recall and attend to the previous 512 tokens generated or provided in the prompt.
+*   **Data Type:** Full precision `float32`.
+*   **KV Cache Size:** The memory required to store past context grows with sequence length.
+    $$ \text{Size} = 2 \times n\_layers \times seq\_len \times kv\_dim \times 4 \text{ bytes} $$
+    With current parameters, the KV cache occupies a significant portion of the allocated run state in PSRAM, enabling the 512-token context.
+
 
 ## License
 
