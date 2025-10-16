@@ -11,6 +11,7 @@
 
 
 static const char *TAG = "MAIN";
+#define NUM_GENERATIONS 20 // Constant for number of generations
 
 /**
  * @brief intializes SPIFFS storage
@@ -113,7 +114,7 @@ void app_main(void)
     float temperature = 0.8f;        // 0.0 = greedy deterministic. 1.0 = original. don't set higher
     float topp = 0.9f;               // top-p in nucleus sampling. 1.0 = off. 0.9 works well, but slower
     int steps = 1024;                 // number of steps to run for
-    char *prompt = "One day Donald said";             // prompt string
+    char *prompt = "One day in Seattle";             // prompt string
     // In app_main
     unsigned long long rng_seed = get_random_seed();
 
@@ -142,7 +143,10 @@ void app_main(void)
     ESP_LOGI(TAG, "Creating sampler with temperature=%f, topp=%f", temperature, topp);
     build_sampler(&sampler, transformer.config.vocab_size, temperature, topp, rng_seed);
 
-    // run!
-
-    generate(&transformer, &tokenizer, &sampler, prompt, steps, &generate_complete_cb);
+    // run multiple generations!
+    for (int i = 0; i < NUM_GENERATIONS; i++)
+    {
+        printf("Generating (%d/%d)\n", i + 1, NUM_GENERATIONS);
+        generate(&transformer, &tokenizer, &sampler, prompt, steps, &generate_complete_cb);
+    }
 }
