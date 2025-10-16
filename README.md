@@ -1,6 +1,6 @@
 # Running a LLM on the ESP32
 
-A port of llama2.c for the ESP32-S3 microcontroller. This project implements a lightweight version of the Llama 2 architecture optimized for embedded systems.
+A port of llama2.c for the ESP32-S3 microcontroller. This project implements a lightweight version of the Llama 2 architecture optimized for embedded systems. See [parent repository](https://github.com/jake-g/micro-llm) for more details on training custom models.
 
 
 <img src="https://imgur.com/XuHewD5.png" width="200">
@@ -192,6 +192,86 @@ How does it fit in ~3MB of usable memory? The architecture is aggressively scale
     $$ \text{Size} = 2 \times n\_layers \times seq\_len \times kv\_dim \times 4 \text{ bytes} $$
     With current parameters, the KV cache occupies a significant portion of the allocated run state in PSRAM, enabling the 512-token context.
 
+
+### Original [llama2.c](https://github.com/karpathy/llama2.c): vs. ESP32 Port: [micro-llm](https://github.com/jake-g/micro-llm) 
+
+Analysis of the changes made to port Andrej Karpathy's original single-file C implementation in [`run.c`](https://github.com/karpathy/llama2.c/blob/master/run.c) to a hardware-accelerated, multi-core library for the ESP32-S3 microcontroller, found in the [esp32-llm](https://github.com/jake-g/esp32-llm) project's [`llm.c`](https://github.com/jake-g/esp32-llm/blob/main/main/llm.c) and [`llm.h`](https://github.com/jake-g/esp32-llm/blob/main/main/llm.h). 
+The port re-architects the original code to leverage the specific features of a real-time embedded environment.
+
+### Memory Architecture & Model Loading
+
+The port's primary challenge was adapting to a microcontroller's memory model, which lacks an MMU and virtual memory.
+
+*   **From Memory-Mapping to Direct Loading:** The original `run.c` uses `mmap()` to map the model file into virtual memory. The ESP32 port replaces this by reading the model from a SPIFFS filesystem directly into a `malloc`'d buffer in external PSRAM.
+    ```c
+    // Original mmap() approach in run.c
+    *data = mmap(NULL, *file_size, PROT_READ, MAP_PRIVATE, *fd, 0);
+    ```
+    ```c
+    // ESP32 Port: Manual load from SPIFFS into PSRAM
+    *data = malloc(*file_size);
+    fread(*data, 1, *file_size, file);
+    ```
+
+*   **Compatibility Shims:** To minimize code changes, POSIX functions like `munmap` are redefined as macros that call `free()` or do nothing, preserving the original structure.
+    ```c
+    #define munmap(ptr, length) custom_munmap(ptr) // custom_munmap calls free()
+    #define close(fd) custom_close(fd)             // custom_close does nothing
+    ```
+*   **Memory Debugging:** The port uses `esp_get_free_heap_size()` during loading to log available PSRAM, a critical step for debugging on a resource-constrained device.
+
+### Performance: Parallelism & Hardware Acceleration
+
+The port replaces OpenMP with an explicit dual-core implementation using FreeRTOS and ESP-IDF's hardware libraries.
+
+#### Matrix Multiplication (`matmul`)
+
+The `matmul` function, the main performance bottleneck, is heavily optimized.
+
+1.  **Hardware-Accelerated Dot Product:** The C `for` loop for dot products is replaced by a single call to the `esp-dsp` library, which uses the ESP32-S3's vector instructions.
+    *   **Original [`run.c`](https://github.com/karpathy/llama2.c/blob/master/run.c):**
+        ```c
+        for (int j = 0; j < n; j++) {
+            val += w[i * n + j] * x[j];
+        }
+        ```    
+    *   **ESP32 Port [`llm.c`](https://github.com/jake-g/esp32-llm/blob/main/main/llm.c):**
+        
+        ```c
+        dsps_dotprod_f32_aes3(row, x, &val, n);
+        ```
+2.  **RTOS-based Parallelization:** Instead of `#pragma omp parallel for`, the port uses a persistent FreeRTOS task (`matmul_task`) pinned to Core 1. The `matmul` function on Core 0 computes the first half of the work, signals the task via a semaphore to compute the second half, and then uses an event group to sync both cores before returning.
+
+#### Multi-Head Attention (`forward`)
+The same manual parallelization pattern is applied to the multi-head attention loop. The `for` loop over heads is split, with Core 0 and a dedicated `forward_task` on Core 1 each processing half the workload concurrently.
+
+### Generation Loop & Sampler Enhancements
+
+The port adds features to make the LLM a reusable and robust application component.
+
+*   **High-Quality Randomness:** The RNG is seeded with the ESP32's hardware true random number generator via `esp_random()` instead of `time(NULL)`.
+
+*   **State Management for Continuous Generation:** A new `reset_run_state()` function uses `memset` to efficiently clear activation and KV-cache buffers, allowing for multiple generations without reloading the model.
+
+*   **Application Callback API:** The `generate` function accepts a callback pointer (`generated_complete_cb`) which is invoked upon completion. This decouples the LLM engine from the main application logic.
+
+*   **Sampler Logic:** The port standardizes on Top-P (`sample_topp`) sampling for its stability, removing the original's fallback to multinomial sampling. **TODO:** Investigate re-enabling `sample_mult` as an option for specific use cases where `topp >= 1.0`.
+
+### ESP32-S3 Specific Optimizations
+
+The port's performance relies on features unique to the ESP32-S3 and its SDK.
+
+*   **Vector Instructions (SIMD):** The `dsps_dotprod_f32_aes3` function compiles to assembly that uses the ESP32-S3's SIMD hardware. This allows the CPU to perform calculations on a vector of floats in a single clock cycle, providing a massive speedup over scalar operations.
+
+*   **Memory Alignment for Vectorization:** Using SIMD instructions requires strict memory alignment. The custom `v4sf` type ensures this. The `__attribute__((aligned(16)))` directive forces the compiler to place these variables on 16-byte boundaries, satisfying the hardware requirement.
+    ```c
+    typedef float v4sf __attribute__((aligned(16)));
+    ```
+
+*   **FreeRTOS Core Affinity:** The compute-heavy tasks are explicitly pinned to Core 1 using `xTaskCreatePinnedToCore`. This isolates the inference workload, leaving Core 0 free for application logic and system services (like networking), resulting in more predictable performance. **TODO:** The fixed 2048-byte stack for these tasks should be profiled to optimize SRAM usage.
+    ```c
+    xTaskCreatePinnedToCore(matmul_task, "MatMul2", 2048, ..., 1); // Pin to Core 1
+    ```
 
 ## License
 
