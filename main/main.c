@@ -112,7 +112,7 @@ void app_main(void)
     // char *checkpoint_path = "/data/aidreams260K.bin"; // e.g. out/model.bin
     char *checkpoint_path = "/data/stories260K.bin"; // e.g. out/model.bin
     char *tokenizer_path = "/data/tok512_stories.bin";
-    float temperature = 0.8f;        // 0.0 = greedy deterministic. 1.0 = original. don't set higher
+    float temperature = 0.9f;        // 0.0 = greedy deterministic. 1.0 = original. don't set higher
     float topp = 0.9f;               // top-p in nucleus sampling. 1.0 = off. 0.9 works well, but slower
     int steps = 1024;                 // number of steps to run for
     char *prompt = "Once upon a time in Seattle";             // prompt string

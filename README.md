@@ -34,28 +34,22 @@ I (1160) MAIN: Creating sampler with temperature=0.800000, topp=0.900000
 I (1160) LLM: Building sampler with temperature: 0.800000, topp: 0.900000
 I (1170) LLM: Sampler built with temperature: 0.800000, topp: 0.900000
 
-Generating (1/10)
-Once upon a time in Seattle, there was a little girl named Lily. She loved to eat all the animals and her mommy. One day, she went to a park to play with her friends. The park was very pretty and had a big box.
-Lily's mommy brought her a picture of a tree. Lily was so happy and closed her eyes. She put the picture on her grandma's box. When she got there, she saw a big birdie. The bird was very scared of the bird and wanted to help the bird.
-Lily started to cry and asked her mommy, "Can I play with your picture?" Her mommy said, "Yes, but be careful." Lily was happy to help her mommy. They played together every day.
-Achieved tok/s: 18.587
-
-Generating (2/10)
-Once upon a time in Seattle, there was a little girl named Lily. She had a big, red ball that she loved to play with. One day, she went to the park to play with her friends.
-As they walked, Lily saw a big bird flying in the sky. She wanted to go to her friend, so she climbed up the ball. But the bird was too small and didn't know what to do.
-Lily's friend, Timmy, came over to play. "What are you doing?" asked Lily. "That's a good idea. It's a special bird."
-Lily replied, "I'm sorry, Lily. I didn't know what to do."
-The bird said, "I'm sorry, Lily. I didn't know what to do. I'm sorry to help you." Lily asked, "Don't worry, we can help the bird. We can help you."
-The bird felt better and took the bird and Lily felt happy! She said, "Thank you, Timmy. You are a good friend." From that day on, Lily and the bird became good friends and played together every day.
-Achieved tok/s: 14.282
-
-Generating (3/10)
-Once upon a time in Seattle, there was a little girl named Lily. She loved to play outside in the park with her friends. One day, she saw a big, red ball. She wanted to play with it, but the ball was too big.
-Lily's friend, Tom, came over to play. "What are you doing?" she asked. 
-"I want to play with me," said Lily. "It's okay to be careful."
-Lily was very happy and said, "Yes, I will help you." 
-They both sat down and laughed. They played together and had lots of fun. Then, they found a big green ball. Lily took the ball and put it on the ball. After a while, Lily's mom came into the room and saw the ball. She was so happy and hugged Lily. "Thank you, Lily!" she said. "You're welcome, Lily."
-Achieved tok/s: 17.756
+Once upon a time, Jake went to the park. He saw a big gray box. He wanted to see what was inside. He wanted to see what was inside.
+The boy got scared and ran to the garden. He saw a big bug on the ground. He wanted to show the bug. He picked up the bug. He put the bug on the bug and started to bug.
+The bug was very happy. He went to the bug and said, "Thank you!" The bug was happy to see the bug. The bug was happy too. It was the bug.
+Achieved tok/s: 19.393
+I (12770) MAIN: Generating (2/10)
+Once upon a time, Jake was very scared. He wanted to set it in the tree. He wanted to see what was inside. He wanted to see what was in the slide.
+Jack said, "I want to see what's that?"
+That night, Jack and his mom went to the park. They saw a small plant in the sky. The ball opened the ball and found the ball. The ball was on the slide. The ball was very happy.
+Jack and the ball ran away. They were happy. They played together all day. They had many friends.
+Achieved tok/s: 17.558
+I (30230) MAIN: Generating (3/10)
+Once upon a time, Jake was very sleepy. He was very excited to see him. He wanted to see what was going to do. But he did not want to share his toys.
+Jack saw a bear and wanted to climb the tree. He said, "It's okay, Jack. You can climb the tree."
+Jack was happy to help the bear. He went to the tree and said, "I want to play with your toys." His mom smiled and said, "Hello, Jack. You are very special your toy."
+Jack was happy to have a new toy. He wished he had a great time. He went to the tree with his toys and showed him the toy.
+Achieved tok/s: 16.408
 ```
 
 
@@ -161,7 +155,7 @@ The text generation process follows a standard LLM pipeline, adapted for C and e
         *   Residual connections after Attention and FFN blocks.
     *   **Classifier:** The final output vector is normalized and projected via matrix multiplication into logits (size of vocabulary).
 3.  **Sampler:** The logits are converted into probabilities via Softmax. A token is selected using **Top-P (Nucleus) Sampling** and **Temperature** scaling to introduce controlled randomness. High-quality entropy from the ESP32 hardware RNG is used to seed the sampling process.
-4.  **Detokenizer:** The selected integer token is mapped back to its corresponding string piece and output to the console.
+4.  **Decoder:** The selected integer token is mapped back to its corresponding string piece and output to the console.
 5.  **Autoregression:** The newly generated token becomes the input for the next iteration.
 
 ### ESP32-S3 Optimizations
