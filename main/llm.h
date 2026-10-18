@@ -112,7 +112,8 @@ void reset_run_state(RunState *s, Config *p);
 void build_transformer(Transformer *t, char* checkpoint_path);
 void build_tokenizer(Tokenizer* t, char* tokenizer_path, int vocab_size);
 void build_sampler(Sampler* sampler, int vocab_size, float temperature, float topp, unsigned long long rng_seed);
-void generate(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler, char *prompt, int steps, generated_complete_cb cb_done);
+void generate(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler, char *prompt, int steps,
+              char *out, size_t out_len, generated_complete_cb cb_done);
 void free_sampler(Sampler* sampler);
 void free_transformer(Transformer* t);
 void free_tokenizer(Tokenizer* t);

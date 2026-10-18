@@ -69,6 +69,8 @@ void write_display(char *text)
     
 }
 
+static float last_tok_s = 0.0f; // throughput of the most recent generation
+
 /**
  * @brief Callbacks once generation is done
  * 
@@ -76,10 +78,7 @@ void write_display(char *text)
  */
 void generate_complete_cb(float tk_s)
 {
-    char buffer[50];
-    sprintf(buffer, "%.2f tok/s", tk_s);
-    // write_display(buffer); // char *text
-    // printf(text); // TODO connect display
+    last_tok_s = tk_s; // TODO connect display
 }
 
 /**
@@ -139,6 +138,29 @@ void app_main(void)
     Tokenizer tokenizer;
     build_tokenizer(&tokenizer, tokenizer_path, transformer.config.vocab_size);
 
+    // Self-test: greedy decoding is deterministic, so the board must reproduce
+    // karpathy/llama2.c run.c on the host:
+    //   ./run stories260K.bin -z tok512_stories.bin -t 0 -n 48 -i "Once upon a time"
+    // stories260K runs at about 20 tok/s; far below 10 means PSRAM, cache or
+    // CPU frequency are misconfigured.
+    static const char *golden =
+        "Once upon a time, there was a little girl named Lily. She loved to play "
+        "outside in the park. One day, she saw a big, red ball. She wanted to";
+    static char selftest_out[256];
+    Sampler greedy;
+    build_sampler(&greedy, transformer.config.vocab_size, 0.0f, topp, rng_seed);
+    generate(&transformer, &tokenizer, &greedy, "Once upon a time", 48, selftest_out,
+             sizeof(selftest_out), &generate_complete_cb);
+    free_sampler(&greedy);
+    int golden_ok = strcmp(selftest_out, golden) == 0;
+    int selftest_ok = golden_ok && last_tok_s >= 10.0f;
+    printf("LLM_SELFTEST {\"ok\":%s,\"golden\":%s,\"tok_s\":%.2f}\n", selftest_ok ? "true" : "false",
+           golden_ok ? "true" : "false", last_tok_s);
+    if (!selftest_ok)
+    {
+        return;
+    }
+
     // build the Sampler
     Sampler sampler;
     ESP_LOGI(TAG, "Creating sampler with temperature=%f, topp=%f", temperature, topp);
@@ -148,6 +170,7 @@ void app_main(void)
     for (int i = 0; i < NUM_GENERATIONS; i++)
     {
         ESP_LOGI(TAG, "Generating (%d/%d)", i + 1, NUM_GENERATIONS);
-        generate(&transformer, &tokenizer, &sampler, prompt, steps, &generate_complete_cb);
+        generate(&transformer, &tokenizer, &sampler, prompt, steps, NULL, 0, &generate_complete_cb);
+        printf("LLM_RESULT {\"gen\":%d,\"tok_s\":%.2f}\n", i + 1, last_tok_s);
     }
 }

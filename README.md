@@ -11,6 +11,9 @@ A port of llama2.c for the ESP32-S3 microcontroller. This project implements a l
 * upgraded to `esp-idf` version `5.5`
 * disable harware display for now
 * generate text for N generations
+* upgraded to `esp-idf` version `6.1` (`esp-dsp` `1.8.2`); halts on panic instead of reboot-looping
+* fixed top-p sampling heap corruption under GCC 15 (aligned `v4sf` scalars passed by value)
+* boot self-test against `llama2.c` `run.c` golden output, checked from the host with [`scripts/verify_board.py`](scripts/verify_board.py)
 
 **Example Output**
 ```

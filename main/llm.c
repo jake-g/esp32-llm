@@ -181,6 +181,18 @@ void read_checkpoint(char *checkpoint, Config *config, TransformerWeights *weigh
     *file_size = ftell(file); // get the file size, in bytes
     fseek(file, 0, SEEK_SET); // move back to beginning for reading
     ESP_LOGI(TAG, "File size: %zu bytes", *file_size);
+    size_t head = config->dim / config->n_heads;
+    size_t kv = config->n_kv_heads * head;
+    size_t floats = (size_t)config->vocab_size * config->dim * (shared_weights ? 1 : 2) +
+                    config->n_layers * (2 * config->dim + 2 * config->dim * config->dim +
+                                        2 * config->dim * kv + 3 * config->dim * config->hidden_dim) +
+                    config->dim + config->seq_len * head;
+    if (sizeof(Config) + floats * sizeof(float) != *file_size)
+    {
+        ESP_LOGE(TAG, "Checkpoint size mismatch: expected %zu bytes (legacy v0 export)",
+                 sizeof(Config) + floats * sizeof(float));
+        exit(EXIT_FAILURE);
+    }
     ESP_LOGI(TAG, "Free ram available: %lu", esp_get_free_heap_size());
     *data = malloc(*file_size);
     if (*data == NULL)
@@ -1015,8 +1027,14 @@ long time_in_ms()
 // ----------------------------------------------------------------------------
 // generation loop
 
-void generate(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler, char *prompt, int steps, generated_complete_cb cb_done)
+void generate(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler, char *prompt, int steps,
+              char *out, size_t out_len, generated_complete_cb cb_done)
 {
+    size_t out_used = 0;
+    if (out != NULL && out_len > 0)
+    {
+        out[0] = '\0';
+    }
     reset_run_state(&transformer->state, &transformer->config);
     char *empty_prompt = "";
     if (prompt == NULL)
@@ -1066,6 +1084,11 @@ void generate(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler, 
         // print the token as string, decode it with the Tokenizer object
         char *piece = decode(tokenizer, token, next);
         safe_printf(piece); // same as printf("%s", piece), but skips "unsafe" bytes
+        if (out != NULL && out_used + strlen(piece) < out_len)
+        {
+            strcpy(out + out_used, piece);
+            out_used += strlen(piece);
+        }
         fflush(stdout);
         token = next;
 
