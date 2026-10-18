@@ -31,10 +31,6 @@
 #define ALL_SYNC_BITS (TASK_0_BIT | TASK_1_BIT)
 #define ALL_FORWARD_TASKS (FORWARD_TASK_1 | FORWARD_TASK_2)
 
-
-#define LOG_LOCAL_LEVEL ESP_LOG_DEBUG
-#include "esp_log.h"
-
 typedef struct
 {
     v4sf *xout;
@@ -64,9 +60,6 @@ typedef struct
     int task_num;
 } ForwardTaskParams;
 
-EventGroupHandle_t xEventGroup;
-EventGroupHandle_t ForwardEventGroup;
-
 static const char *TAG = "LLM";
 TaskHandle_t handle_forward_task = NULL;
 TaskHandle_t matmul_task_2 = NULL;
@@ -74,8 +67,11 @@ TaskHandle_t matmul_task_2 = NULL;
 ForwardTaskParams *forward_params = NULL;
 MatMulTaskParams *matmul_params = NULL;
 
-SemaphoreHandle_t semaDataReady;
-SemaphoreHandle_t semaForwardDataReady;
+// Core 0 gives "work", computes its half, then waits for "done".
+SemaphoreHandle_t semaMatmulWork;
+SemaphoreHandle_t semaMatmulDone;
+SemaphoreHandle_t semaForwardWork;
+SemaphoreHandle_t semaForwardDone;
 
 void matmul_task(void *params);
 void forward_task(void *params);
@@ -218,14 +214,10 @@ void build_transformer(Transformer *t, char *checkpoint_path)
     ESP_LOGI(TAG, "Transformer successfully built");
 
     // FreeRTos Tasks
-    xEventGroup = xEventGroupCreate();
-    ForwardEventGroup = xEventGroupCreate();
-    semaDataReady = xSemaphoreCreateBinary();
-    semaForwardDataReady = xSemaphoreCreateBinary();
-    xSemaphoreGive(semaDataReady);
-    xSemaphoreTake(semaDataReady, portMAX_DELAY);
-    xSemaphoreGive(semaForwardDataReady);
-    xSemaphoreTake(semaForwardDataReady, portMAX_DELAY);
+    semaMatmulWork = xSemaphoreCreateBinary();
+    semaMatmulDone = xSemaphoreCreateBinary();
+    semaForwardWork = xSemaphoreCreateBinary();
+    semaForwardDone = xSemaphoreCreateBinary();
 
     matmul_params = malloc(sizeof(MatMulTaskParams));
     forward_params = malloc(sizeof(ForwardTaskParams));
@@ -297,14 +289,10 @@ void softmax(v4sf *x, int size)
 
 void matmul_task(void *params)
 {
-    const TickType_t xDelay = 1 / portTICK_PERIOD_MS;
     MatMulTaskParams *p = (MatMulTaskParams *)params;
-    TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
-    char *tName = pcTaskGetName(current_task);
-    // ESP_LOGI(TAG, "Created Task %s", tName);
     for (;;)
     {
-        if (xSemaphoreTake(semaDataReady, portMAX_DELAY) == pdTRUE)
+        if (xSemaphoreTake(semaMatmulWork, portMAX_DELAY) == pdTRUE)
         {
             //   ESP_LOGI(TAG, "Started Task %s", tName);
             for (int i = p->start; i < p->end; i++)
@@ -315,22 +303,17 @@ void matmul_task(void *params)
                 p->xout[i] = val;
             }
             //    ESP_LOGI(TAG, "Completed task %s", tName);
-            xSemaphoreGive(semaDataReady);
-            xEventGroupSync(xEventGroup, p->task_num, ALL_SYNC_BITS, portMAX_DELAY);
+            xSemaphoreGive(semaMatmulDone);
         }
     }
 }
 
 void forward_task(void *params)
 {
-    const TickType_t xDelay = 1 / portTICK_PERIOD_MS;
     ForwardTaskParams *t_params = (ForwardTaskParams *)params;
-    TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
-    char *tName = pcTaskGetName(current_task);
-    // ESP_LOGI(TAG, "Created Task %s", tName);
     for (;;)
     {
-        if (xSemaphoreTake(semaForwardDataReady, portMAX_DELAY) == pdTRUE)
+        if (xSemaphoreTake(semaForwardWork, portMAX_DELAY) == pdTRUE)
         {
             //   ESP_LOGI(TAG, "Started Task %s", tName);
             int h;
@@ -377,8 +360,7 @@ void forward_task(void *params)
                 }
             }
             //   ESP_LOGI(TAG, "Completed task %s", tName);
-            xSemaphoreGive(semaForwardDataReady);
-            xEventGroupSync(ForwardEventGroup, t_params->task_num, ALL_FORWARD_TASKS, portMAX_DELAY);
+            xSemaphoreGive(semaForwardDone);
         }
     }
 }
@@ -390,7 +372,7 @@ void matmul(v4sf *xout, v4sf *x, v4sf *w, int n, int d)
     // n is the number of columns
     // d X n
     *matmul_params = (MatMulTaskParams){xout, x, w, d / 2, d, n, d, TASK_1_BIT};
-    xSemaphoreGive(semaDataReady);
+    xSemaphoreGive(semaMatmulWork);
     for (int i = 0; i < d / 2; i++)
     {
         v4sf val = 0.0f;
@@ -398,15 +380,7 @@ void matmul(v4sf *xout, v4sf *x, v4sf *w, int n, int d)
         dsps_dotprod_f32_aes3(row, x, &val, n);
         xout[i] = val;
     }
-    if (xSemaphoreTake(semaDataReady, portMAX_DELAY) == pdTRUE)
-    {
-        xEventGroupSync(xEventGroup,
-                        TASK_0_BIT,
-                        ALL_SYNC_BITS,
-                        portMAX_DELAY);
-
-        xEventGroupClearBits(xEventGroup, ALL_SYNC_BITS);
-    }
+    xSemaphoreTake(semaMatmulDone, portMAX_DELAY);
     //   ESP_LOGI(TAG, "Completed MatMul tasks");
 }
 
@@ -481,7 +455,7 @@ v4sf *forward(Transformer *transformer, int token, int pos)
             .head_size = head_size,
             .task_num = FORWARD_TASK_1,
         };
-        xSemaphoreGive(semaForwardDataReady);
+        xSemaphoreGive(semaForwardWork);
 
         // multihead attention. iterate over all heads
         int h;
@@ -527,15 +501,8 @@ v4sf *forward(Transformer *transformer, int token, int pos)
                 }
             }
         }
-        if (xSemaphoreTake(semaForwardDataReady, portMAX_DELAY) == pdTRUE)
+        if (xSemaphoreTake(semaForwardDone, portMAX_DELAY) == pdTRUE)
         {
-
-            xEventGroupSync(ForwardEventGroup,
-                            FORWARD_TASK_2,
-                            ALL_FORWARD_TASKS,
-                            portMAX_DELAY);
-
-            xEventGroupClearBits(ForwardEventGroup, ALL_FORWARD_TASKS);
 
             // final matmul to get the output of the attention
             matmul(s->xb2, s->xb, w->wo + l * dim * dim, dim, dim);
