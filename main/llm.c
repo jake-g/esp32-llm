@@ -867,7 +867,7 @@ int sample_argmax(v4sf *probabilities, int n)
     return max_i;
 }
 
-int sample_mult(v4sf *probabilities, int n, v4sf coin)
+int sample_mult(v4sf *probabilities, int n, float coin)
 {
     // sample index from probabilities (they must sum to 1!)
     // coin is a random number in [0, 1), usually from random_f32()
@@ -894,7 +894,9 @@ int compare(const void *a, const void *b)
     return 0;
 }
 
-int sample_topp(v4sf *probabilities, int n, v4sf topp, ProbIndex *probindex, v4sf coin)
+// Scalars are plain float: v4sf is aligned(16), and GCC 15 (Xtensa) passes
+// over-aligned by-value arguments in different registers at caller and callee.
+int sample_topp(v4sf *probabilities, int n, float topp, ProbIndex *probindex, float coin)
 {
     // top-p sampling (or "nucleus sampling") samples from the smallest set of
     // tokens that exceed probability topp. This way we never sample tokens that
@@ -973,7 +975,7 @@ unsigned int random_u32(unsigned long long *state)
     ESP_LOGD(TAG, "Final result: %u", result);
     return result;
 }
-v4sf random_f32(unsigned long long *state)
+float random_f32(unsigned long long *state)
 { // random v4sf32 in [0,1)
     return (random_u32(state) >> 8) / 16777216.0f;
 }
@@ -1016,7 +1018,7 @@ int sample(Sampler *sampler, v4sf *logits) {
         }
         
         softmax(logits, sampler->vocab_size);
-        v4sf coin = random_f32(&sampler->rng_state);
+        float coin = random_f32(&sampler->rng_state);
         ESP_LOGD(TAG, "Generated coin: %f", coin);
         
         // Always use top-p sampling as it's more stable
