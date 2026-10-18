@@ -3,3 +3,6 @@ build/
 managed_components/
 .DS_Store
 TODO.md
+sdkconfig.old
+__pycache__/
+*.pyc
