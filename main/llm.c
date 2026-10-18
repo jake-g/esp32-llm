@@ -73,6 +73,15 @@ SemaphoreHandle_t semaMatmulDone;
 SemaphoreHandle_t semaForwardWork;
 SemaphoreHandle_t semaForwardDone;
 
+static int s_worker_core = 1;
+static unsigned int s_worker_priority = 19;
+
+void llm_set_worker_affinity(int core_id, unsigned int priority)
+{
+    s_worker_core = core_id;
+    s_worker_priority = priority;
+}
+
 void matmul_task(void *params);
 void forward_task(void *params);
 
@@ -233,8 +242,10 @@ void build_transformer(Transformer *t, char *checkpoint_path)
 
     matmul_params = malloc(sizeof(MatMulTaskParams));
     forward_params = malloc(sizeof(ForwardTaskParams));
-    xTaskCreatePinnedToCore(matmul_task, "MatMul2", 2048, matmul_params, 19, &matmul_task_2, 1);             // Run on Core 1
-    xTaskCreatePinnedToCore(forward_task, "ForwardTask", 2048, forward_params, 19, &handle_forward_task, 1); // Run on Core 1
+    xTaskCreatePinnedToCore(matmul_task, "MatMul2", 2048, matmul_params, s_worker_priority, &matmul_task_2,
+                            s_worker_core);
+    xTaskCreatePinnedToCore(forward_task, "ForwardTask", 2048, forward_params, s_worker_priority,
+                            &handle_forward_task, s_worker_core);
     ESP_LOGI(TAG, "Created FreeRTOS Tasks");
 }
 
@@ -1111,6 +1122,92 @@ void generate(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler, 
 
     free(prompt_tokens);
     // ESP_LOGI(TAG, "Generate complete");
+}
+
+int generate_stream(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler, const char *prompt,
+                    int steps, char *out, size_t out_len, generated_token_cb token_cb, void *user,
+                    generated_complete_cb cb_done)
+{
+    size_t out_used = 0;
+    if (out != NULL && out_len > 0)
+    {
+        out[0] = '\0';
+    }
+    reset_run_state(&transformer->state, &transformer->config);
+    if (prompt == NULL)
+    {
+        prompt = "";
+    }
+    if (steps <= 0 || steps > transformer->config.seq_len)
+    {
+        steps = transformer->config.seq_len;
+    }
+
+    int num_prompt_tokens = 0;
+    int *prompt_tokens = (int *)malloc((strlen(prompt) + 3) * sizeof(int));
+    if (prompt_tokens == NULL)
+    {
+        return -1;
+    }
+    encode(tokenizer, (char *)prompt, 1, 0, prompt_tokens, &num_prompt_tokens);
+    if (num_prompt_tokens < 1)
+    {
+        free(prompt_tokens);
+        return -1;
+    }
+
+    long start = 0;
+    int next;
+    int token = prompt_tokens[0];
+    int pos = 0;
+    int generated = 0;
+    while (pos < steps)
+    {
+        v4sf *logits = forward(transformer, token, pos);
+        if (pos < num_prompt_tokens - 1)
+        {
+            next = prompt_tokens[pos + 1];
+        }
+        else
+        {
+            next = sample(sampler, logits);
+        }
+        pos++;
+        if (next == 1)
+        {
+            break;
+        }
+        char *piece = decode(tokenizer, token, next);
+        if (pos >= num_prompt_tokens)
+        {
+            generated++;
+            if (out != NULL && out_used + strlen(piece) < out_len)
+            {
+                strcpy(out + out_used, piece);
+                out_used += strlen(piece);
+            }
+            if (token_cb != NULL && token_cb(piece, pos, user) != 0)
+            {
+                token = next;
+                break;
+            }
+        }
+        token = next;
+        if (start == 0)
+        {
+            start = time_in_ms();
+        }
+    }
+
+    if (pos > 1 && cb_done != NULL)
+    {
+        long end = time_in_ms();
+        long elapsed = end - start;
+        float tks = elapsed > 0 ? (pos - 1) / (double)elapsed * 1000 : 0.0f;
+        cb_done(tks);
+    }
+    free(prompt_tokens);
+    return generated;
 }
 
 void read_stdin(const char *guide, char *buffer, size_t bufsize)
