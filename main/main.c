@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <inttypes.h>
 #include "esp_spiffs.h"
 #include "sdkconfig.h"
@@ -101,6 +102,18 @@ unsigned long long get_random_seed(void) {
     
     return seed;
 }
+
+/**
+ * @brief Reads one line without its trailing newline; returns 0 at EOF.
+ */
+static int read_line(FILE *f, char *buf, size_t len)
+{
+    if (fgets(buf, len, f) == NULL)
+        return 0;
+    buf[strcspn(buf, "\r\n")] = '\0';
+    return 1;
+}
+
 void app_main(void)
 {
     
@@ -115,6 +128,39 @@ void app_main(void)
     float topp = 0.9f;               // top-p in nucleus sampling. 1.0 = off. 0.9 works well, but slower
     int steps = 1024;                 // number of steps to run for
     char *prompt = "Once upon a time in Seattle";             // prompt string
+
+    // Self-test: greedy decoding is deterministic, so the board must reproduce
+    // karpathy/llama2.c run.c on the host:
+    //   ./run stories260K.bin -z tok512_stories.bin -t 0 -n 48 -i "Once upon a time"
+    // stories260K runs at about 20 tok/s; far below 10 means PSRAM, cache or
+    // CPU frequency are misconfigured.
+    static char st_prompt[256] = "Once upon a time";
+    static char st_golden[512] =
+        "Once upon a time, there was a little girl named Lily. She loved to play "
+        "outside in the park. One day, she saw a big, red ball. She wanted to";
+    int st_steps = 48;
+
+    // A custom model ships /data/model.bin, /data/tokenizer.bin and
+    // /data/selftest.txt (line 1: steps, line 2: prompt, line 3: golden from
+    // `run model.bin -z tokenizer.bin -t 0 -n <steps> -i "<prompt>"`).
+    static char st_steps_line[16];
+    FILE *st = fopen("/data/selftest.txt", "r");
+    if (st != NULL)
+    {
+        int ok = read_line(st, st_steps_line, sizeof(st_steps_line)) &&
+                 read_line(st, st_prompt, sizeof(st_prompt)) &&
+                 read_line(st, st_golden, sizeof(st_golden));
+        fclose(st);
+        if (!ok)
+        {
+            ESP_LOGE(TAG, "Malformed /data/selftest.txt");
+            return;
+        }
+        st_steps = atoi(st_steps_line);
+        checkpoint_path = "/data/model.bin";
+        tokenizer_path = "/data/tokenizer.bin";
+        prompt = st_prompt;
+    }
     // In app_main
     unsigned long long rng_seed = get_random_seed();
 
@@ -138,21 +184,15 @@ void app_main(void)
     Tokenizer tokenizer;
     build_tokenizer(&tokenizer, tokenizer_path, transformer.config.vocab_size);
 
-    // Self-test: greedy decoding is deterministic, so the board must reproduce
-    // karpathy/llama2.c run.c on the host:
-    //   ./run stories260K.bin -z tok512_stories.bin -t 0 -n 48 -i "Once upon a time"
-    // stories260K runs at about 20 tok/s; far below 10 means PSRAM, cache or
-    // CPU frequency are misconfigured.
-    static const char *golden =
-        "Once upon a time, there was a little girl named Lily. She loved to play "
-        "outside in the park. One day, she saw a big, red ball. She wanted to";
-    static char selftest_out[256];
+    if (st_steps == 0 || st_steps > transformer.config.seq_len)
+        st_steps = transformer.config.seq_len;
+    static char selftest_out[512];
     Sampler greedy;
     build_sampler(&greedy, transformer.config.vocab_size, 0.0f, topp, rng_seed);
-    generate(&transformer, &tokenizer, &greedy, "Once upon a time", 48, selftest_out,
+    generate(&transformer, &tokenizer, &greedy, st_prompt, st_steps, selftest_out,
              sizeof(selftest_out), &generate_complete_cb);
     free_sampler(&greedy);
-    int golden_ok = strcmp(selftest_out, golden) == 0;
+    int golden_ok = strcmp(selftest_out, st_golden) == 0;
     int selftest_ok = golden_ok && last_tok_s >= 10.0f;
     printf("LLM_SELFTEST {\"ok\":%s,\"golden\":%s,\"tok_s\":%.2f}\n", selftest_ok ? "true" : "false",
            golden_ok ? "true" : "false", last_tok_s);
